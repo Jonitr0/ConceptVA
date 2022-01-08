@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import math
 import scipy as sp
 import scipy.ndimage
+from diagramcreator import create_diagram, create_diagram2
+import pickle
 
 start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
@@ -24,6 +26,28 @@ max_time = QtCore.QDateTime(QtCore.QDate(2013, 12, 31), QtCore.QTime(23, 59))
 
 # start time when launching the program
 begin_start_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(0, 0))
+
+
+class DataclassProperties:
+    # columns in data_obs, which we use for the diagram
+    data_obs_diagram_cols = ['QF_sensor_1', 'sensor_2', 'QF_sensor_2', 'sensor_3', 'QF_sensor_3',
+                             'sensor_4', 'QF_sensor_4', 'sensor_5', 'QF_sensor_5', 'sensor_6',
+                             'QF_sensor_6', 'sensor_7', 'QF_sensor_7']
+    # columns in data_bw, which we use for the diagram
+    data_bw_diagram_cols = ['sensor_1', 'sensor_2',
+                            'sensor_3', 'sensor_4', 'sensor_5', 'sensor_6', 'sensor_7']
+    # columns in data_fw, which we use for the diagram
+    data_fw_diagram_cols = ['sensor_1', 'sensor_2',
+                            'sensor_3', 'sensor_4', 'sensor_5', 'sensor_6', 'sensor_7']
+
+    # dict: key is a column of the dataframe.
+    # dict returns the global min or max of the column in the dataframe
+    data_obs_cols_to_max = dict()
+    data_obs_cols_to_min = dict()
+    data_bw_cols_to_max = dict()
+    data_bw_cols_to_min = dict()
+    data_fw_cols_to_max = dict()
+    data_fw_cols_to_min = dict()
 
 
 @dataclass
@@ -89,6 +113,7 @@ def create_salinity_df(md: map_data):
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.db_props = DataclassProperties()
         self.radarplot_webview = QtWebEngineWidgets.QWebEngineView()
         self.update_button = QtWidgets.QPushButton("Update")
         self.next_day_button = QtWidgets.QPushButton(">")
@@ -132,6 +157,33 @@ class map_view(QtWidgets.QMainWindow):
         self.sal_min_global = math.floor(min(self.runtime_ds.data_obs['sensor_1'].min(),
                                              self.runtime_ds.data_bw['sensor_1'].min(),
                                              self.runtime_ds.data_fw['sensor_1'].min()))
+
+        self.db_props.data_fw_cols_to_min = {
+            col: self.runtime_ds.data_fw[col].min()
+            for col in self.db_props.data_fw_diagram_cols
+        }
+        self.db_props.data_fw_cols_to_max = {
+            col: self.runtime_ds.data_fw[col].max()
+            for col in self.db_props.data_fw_diagram_cols
+        }
+
+        self.db_props.data_obs_cols_to_min = {
+            col: self.runtime_ds.data_obs[col].min()
+            for col in self.db_props.data_obs_diagram_cols
+        }
+        self.db_props.data_obs_cols_to_max = {
+            col: self.runtime_ds.data_obs[col].max()
+            for col in self.db_props.data_obs_diagram_cols
+        }
+
+        self.db_props.data_bw_cols_to_min = {
+            col: self.runtime_ds.data_bw[col].min()
+            for col in self.db_props.data_bw_diagram_cols
+        }
+        self.db_props.data_bw_cols_to_max = {
+            col: self.runtime_ds.data_bw[col].max()
+            for col in self.db_props.data_bw_diagram_cols
+        }
 
     # read polygon data needed to construct visualizations
     def read_polygon(self):
@@ -325,7 +377,8 @@ class map_view(QtWidgets.QMainWindow):
     def update_finished(self):
         # update label
         self.date_label.setText(
-            "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.start_datetime_edit.dateTime().addDays(1).toString())
+            "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.start_datetime_edit.dateTime().addDays(
+                1).toString())
 
     # create the GUI consisting of a map, a date-time selection field and an update button
     def create_gui(self):
@@ -346,6 +399,7 @@ class map_view(QtWidgets.QMainWindow):
 
         # build button
         self.update_button.clicked.connect(lambda: self.update_map())
+        self.update_button.clicked.connect(self.show_new_plot)
 
         # build labels
         from_label = QtWidgets.QLabel("Analyze Data for 24 hours, starting from: ")
@@ -419,11 +473,73 @@ class map_view(QtWidgets.QMainWindow):
         else:
             if self.salinity_spinbox.value != self.slider.value:
                 self.slider.setValue(self.salinity_spinbox.value() * 100.0)
+        # self.show_new_plot()
 
     def show_points_slot(self):
         state = self.display_points_checkbox.isChecked() == 0
         self.gaussfilter_label.setVisible(state)
         self.gaussfilter_spinbox.setVisible(state)
+
+    def show_new_plot(self):
+        start_datetime = self.start_datetime_edit.dateTime()
+        end_datetime = self.start_datetime_edit.dateTime().addDays(1)
+        md = self.get_data_for_time_range(start_datetime, end_datetime)
+
+        # if other dataframe used like data_obs, just change accordingly
+        used_db = md.data_bw
+        used_db_col_names = self.db_props.data_bw_diagram_cols
+        used_db_to_max = self.db_props.data_bw_cols_to_max
+        used_db_to_min = self.db_props.data_bw_cols_to_min
+        salicity_border = self.salinity_spinbox.value()
+
+        filter_below_salicity_border = used_db['sensor_1'] < salicity_border
+        filter_above_salicity_border = used_db['sensor_1'] > salicity_border
+
+        # Dicts, die col - Name auf Mean, Min oder Max abbilden
+        # Die Dicts werden zwischen Unter Salzigkeit und über Salzigkeit
+        # unterschieden.
+        diagram_average_below_salicity = {
+            col: used_db[filter_below_salicity_border][col].mean()
+            for col in used_db_col_names
+        }
+
+        diagram_average_above_salicity = {
+            col: used_db[filter_above_salicity_border][col].mean()
+            for col in used_db_col_names
+        }
+
+        diagram_min_below_salicity = {
+            col: used_db[filter_below_salicity_border][col].min()
+            for col in used_db_col_names
+        }
+
+        diagram_min_above_salicity = {
+            col: used_db[filter_above_salicity_border][col].min()
+            for col in used_db_col_names
+        }
+
+        diagram_max_below_salicity = {
+            col: used_db[filter_below_salicity_border][col].max()
+            for col in used_db_col_names
+        }
+
+        diagram_max_above_salicity = {
+            col: used_db[filter_above_salicity_border][col].max()
+            for col in used_db_col_names
+        }
+
+        create_diagram2(diagram_average_below_salicity,
+                       diagram_average_above_salicity,
+                       diagram_min_below_salicity,
+                       diagram_min_above_salicity,
+                       diagram_max_below_salicity,
+                       diagram_max_above_salicity,
+                       used_db_col_names,
+                       used_db_to_max,
+                       used_db_to_min)
+        html = open('map_view.html').read()
+        self.radarplot_webview.setHtml(html)
+        self.radarplot_webview.setVisible(True)
 
 
 if __name__ == "__main__":
