@@ -138,11 +138,11 @@ def create_diagram2(diagram_average_below_salicity,
     x = [v[0] for v in verts] + [verts[0][0]]
     y = [v[1] for v in verts] + [verts[0][1]]
 
-    p = figure(title="Baseline - Radar plot")
+    p = figure(title="Baseline - Radar plot",plot_width=500, plot_height=500)
     source = ColumnDataSource({'x':x + [centre ],'y':y + [1],'text':col_names})
 
     #p.line(x="x", y="y", source=source)
-    p.patch(x='x', y='y', fill_alpha=0.0, source=source, line_width=1.5)
+    p.patch(x='x', y='y', fill_alpha=0.0, source=source, line_width=1.5,color="black")
 
     labels = LabelSet(x="x",y="y",text="text",source=source)
 
@@ -162,15 +162,16 @@ def create_diagram2(diagram_average_below_salicity,
     f5 = np.array([0.01, 0.01, 0.02, 0.71, 0.74, 0.70, 0.00])
     #xt = np.array(x)
     flist = [np_average_below_salicity,
-             np_average_above_salicity,
-             np_min_below_salicity,
-             np_min_above_salicity,
-             np_max_below_salicity,
-             np_max_above_salicity]
-    colors = ['blue','blue','red', 'red', 'red', 'red', 'red']
+             np_average_above_salicity]
+             #np_min_below_salicity,
+             #np_min_above_salicity,
+             #np_max_below_salicity,
+             #np_max_above_salicity]
+    colors = ['black','red','blue', 'green', 'yellow', 'purple']
+    labels = ['avg_not_sal','avg_sal']#,'min_not_sal','min_sal','max_not_sal','max_sal']
+    print(flist)
     for i in range(len(flist)):
         xt, yt = radar_patch(flist[i], theta, centre)
-        p.patch(x=xt, y=yt, fill_alpha=0.0, line_color=colors[i])
+        p.patch(x=xt, y=yt, fill_alpha=0.0, line_color=colors[i],legend=labels[i])
         #p.line(x=xt, y=yt, color=colors[i])
-
     save(p)

@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import math
 import scipy as sp
 import scipy.ndimage
-from diagramcreator import create_diagram, create_diagram2
+from diagramcreator import create_diagram2
 import pickle
 
 start_coords = [54.12, 8.37]
